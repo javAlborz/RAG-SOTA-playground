@@ -186,25 +186,20 @@ class RerankedHybridVectorDB:
 
     def create_es_index(self):
         """Create Elasticsearch index with appropriate settings"""
-        # Delete existing index if it exists
-        if self.es_client.indices.exists(index=self.index_name):
-            self.es_client.indices.delete(index=self.index_name)
-            print(f"Deleted existing index: {self.index_name}")
-        
-        index_settings = {
-            "settings": {
-                "analysis": {"analyzer": {"default": {"type": "english"}}},
-                "similarity": {"default": {"type": "BM25"}},
-            },
-            "mappings": {
-                "properties": {
-                    "content": {"type": "text", "analyzer": "english"},
-                    "metadata": {"type": "object", "enabled": True}
+        if not self.es_client.indices.exists(index=self.index_name):
+            index_settings = {
+                "settings": {
+                    "analysis": {"analyzer": {"default": {"type": "english"}}},
+                    "similarity": {"default": {"type": "BM25"}},
+                },
+                "mappings": {
+                    "properties": {
+                        "content": {"type": "text", "analyzer": "english"},
+                        "metadata": {"type": "object", "enabled": True}
+                    }
                 }
             }
-        }
-        self.es_client.indices.create(index=self.index_name, body=index_settings)
-        print(f"Created new index: {self.index_name}")
+            self.es_client.indices.create(index=self.index_name, body=index_settings)
 
     def add_documents(self, documents: List[Dict[str, str]]):
         """Add documents to both vector store and Elasticsearch"""
@@ -375,18 +370,12 @@ class RerankedHybridRAGSystem:
         # Retrieve relevant chunks using hybrid search with reranking
         relevant_chunks = self.vector_db.search(question, k=k)
         
-        # Debug: Print source file of retrieved chunks
-        print("\nRetrieved chunks from:", relevant_chunks[0]['metadata']['source'])
-        
         # Prepare context for the LLM
         context = "\n\n".join([
             f"Content {i+1} (Initial Score: {chunk['initial_score']:.3f}, Rerank Score: {chunk['rerank_score']:.3f}):\n{chunk['content']}"
             for i, chunk in enumerate(relevant_chunks)
         ])
         
-        # Debug: Print first few characters of context
-        print("\nFirst 100 chars of context:", context[:100], "...\n")
-            
         # Create the prompt
         prompt = f"""Here is some context information to help answer a question:
 

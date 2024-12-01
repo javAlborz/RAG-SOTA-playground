@@ -12,6 +12,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 from rag1 import DocumentLoader
 # from rag1 import VectorDB
 from rag2 import HybridVectorDB as VectorDB
+from rag3 import RerankedHybridVectorDB as VectorDB
 
 class RAGEvaluator:
     """Evaluates RAG system performance using Pass@k metric"""

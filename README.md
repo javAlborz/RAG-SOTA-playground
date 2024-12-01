@@ -61,8 +61,11 @@ The system supports various document formats:
 - `DocumentLoader`: Handles various file formats and chunking
 - `VectorDB`/`HybridVectorDB`/`RerankedHybridVectorDB`: Different retrieval implementations
 
-## Future Improvements
+## Future Improvements and ToDos
 
 - Implementation of contextual embeddings
 - User interface improvements
 - Using our own endpoints. Requires small llama model for contextual embedding sidequest
+
+- refactor:
+  - common document loader class
