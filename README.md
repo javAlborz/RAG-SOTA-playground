@@ -13,6 +13,14 @@ The system provides three increasingly sophisticated approaches to document retr
 
 3. **Reranked Hybrid Search RAG**
    - Builds on hybrid search by adding Cohere's reranking
+  
+4. **CONTEXTUAL Basic Embedding-based RAG**
+
+5. **CONTEXTUAL Hybrid Search RAG**
+
+6. **CONTEXTUAL Reranked Hybrid Search RAG**
+
+   
 ## Setup
 
 1. Create a virtual environment:
