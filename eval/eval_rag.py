@@ -10,10 +10,12 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 # Change for script that will get evaluated. ToDo: generalize to accept different RAG implementations
 from rag1 import DocumentLoader
-from rag1 import VectorDB
+# from rag1 import VectorDB
 # from rag2 import HybridVectorDB as VectorDB
 # from rag3 import RerankedHybridVectorDB as VectorDB
 # from rag4 import ContextualVectorDB as VectorDB
+# from rag_1_local import VectorDB
+from rag_1_hybrid import VectorDB
 
 
 class RAGEvaluator:
