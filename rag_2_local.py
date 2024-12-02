@@ -4,15 +4,17 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any, Union
 from dotenv import load_dotenv
-import voyageai
-import anthropic
+import openai
 from pathlib import Path
 import PyPDF2
 from tqdm import tqdm
+from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk
 
 # Load environment variables
 load_dotenv()
 
+# DocumentLoader class remains unchanged
 class DocumentLoader:
     """Handles loading and preprocessing of different document types"""
     
@@ -159,178 +161,216 @@ class DocumentLoader:
         
         return chunks
 
-class ContextualVectorDB:
-    """Vector database with contextual embeddings"""
+class HybridVectorDB:
+    """Vector database with hybrid search capabilities (embeddings + BM25)"""
     
-    def __init__(self, api_key: str = None, anthropic_api_key: str = None):
+    def __init__(self, base_url: str = None, api_key: str = None):
+        # Initialize OpenAI client for local embeddings
+        if base_url is None:
+            base_url = os.getenv("LOCAL_EMBEDDINGS_URL", "http://localhost:8000")
         if api_key is None:
-            api_key = os.getenv("VOYAGE_API_KEY")
-        if anthropic_api_key is None:
-            anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+            api_key = os.getenv("LOCAL_API_KEY", "dummy-key")
             
-        self.voyage_client = voyageai.Client(api_key=api_key)
-        self.anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
+        self.embeddings_client = openai.OpenAI(
+            base_url=base_url,
+            api_key=api_key
+        )
+        
+        # Initialize Elasticsearch client for BM25
+        self.es_client = Elasticsearch("http://localhost:9200")
+        self.index_name = "hybrid_search_index"
+        self.create_es_index()
+        
         self.embeddings = []
         self.chunks = []
         self.query_cache = {}
-        
-        # Track token usage for cost analysis
-        self.token_counts = {
-            'input': 0,
-            'output': 0,
-            'cache_read': 0,
-            'cache_creation': 0
-        }
 
-    def _generate_context(self, document: str, chunk: str) -> str:
-        """Generate contextual description for a chunk using Claude"""
-        DOCUMENT_CONTEXT_PROMPT = """
-        <document>
-        {doc_content}
-        </document>
-        """
-
-        CHUNK_CONTEXT_PROMPT = """
-        Here is the chunk we want to situate within the whole document
-        <chunk>
-        {chunk_content}
-        </chunk>
-
-        Please give a short succinct context to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk.
-        Answer only with the succinct context and nothing else.
-        """
-
-        response = self.anthropic_client.beta.prompt_caching.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=1024,
-            temperature=0.0,
-            messages=[
-                {
-                    "role": "user", 
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": DOCUMENT_CONTEXT_PROMPT.format(doc_content=document),
-                            "cache_control": {"type": "ephemeral"}
-                        },
-                        {
-                            "type": "text",
-                            "text": CHUNK_CONTEXT_PROMPT.format(chunk_content=chunk),
-                        }
-                    ]
-                }
-            ],
-            extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
-        )
-        
-        # Update token counts
-        self.token_counts['input'] += response.usage.input_tokens
-        self.token_counts['output'] += response.usage.output_tokens
-        self.token_counts['cache_read'] += response.usage.cache_read_input_tokens
-        self.token_counts['cache_creation'] += response.usage.cache_creation_input_tokens
-        
-        return response.content[0].text
-
-    def add_documents(self, documents: List[Dict[str, str]], source_text: str):
-        """Add documents with contextual embeddings"""
-        print("Processing documents and generating contextual embeddings...")
-        texts_to_embed = []
-        processed_chunks = []
-        
-        for doc in tqdm(documents, desc="Generating context"):
-            # Generate contextual description
-            context = self._generate_context(source_text, doc['content'])
-            
-            # Combine original content with context
-            contextualized_text = f"{doc['content']}\n\nContext: {context}"
-            texts_to_embed.append(contextualized_text)
-            
-            # Store enhanced metadata
-            enhanced_chunk = {
-                'content': doc['content'],
-                'metadata': {
-                    **doc['metadata'],
-                    'context': context
+    def create_es_index(self):
+        """Create Elasticsearch index with appropriate settings"""
+        if not self.es_client.indices.exists(index=self.index_name):
+            index_settings = {
+                "settings": {
+                    "analysis": {"analyzer": {"default": {"type": "english"}}},
+                    "similarity": {"default": {"type": "BM25"}},
+                },
+                "mappings": {
+                    "properties": {
+                        "content": {"type": "text", "analyzer": "english"},
+                        "metadata": {"type": "object", "enabled": True}
+                    }
                 }
             }
-            processed_chunks.append(enhanced_chunk)
+            self.es_client.indices.create(index=self.index_name, body=index_settings)
+
+    def add_documents(self, documents: List[Dict[str, str]]):
+        """Add documents to both vector store and Elasticsearch"""
+        print("Processing documents...")
         
+        # Generate embeddings using local endpoint
+        texts_to_embed = [doc['content'] for doc in documents]
         print("Generating embeddings...")
         batch_size = 128
-        with tqdm(total=len(texts_to_embed), desc="Embedding chunks") as pbar:
+        with tqdm(total=len(texts_to_embed), desc="Embedding documents") as pbar:
             for i in range(0, len(texts_to_embed), batch_size):
                 batch = texts_to_embed[i:i + batch_size]
-                batch_embeddings = self.voyage_client.embed(batch, model="voyage-2").embeddings
+                response = self.embeddings_client.embeddings.create(
+                    model="/e5",  # or your local model name
+                    input=batch
+                )
+                batch_embeddings = [item.embedding for item in response.data]
                 self.embeddings.extend(batch_embeddings)
                 pbar.update(len(batch))
         
-        self.chunks.extend(processed_chunks)
+        # Add to Elasticsearch
+        print("Adding documents to Elasticsearch...")
+        actions = [
+            {
+                "_index": self.index_name,
+                "_source": {
+                    "content": doc['content'],
+                    "metadata": doc['metadata']
+                }
+            }
+            for doc in documents
+        ]
+        bulk(self.es_client, actions)
+        self.es_client.indices.refresh(index=self.index_name)
         
-        # Print token usage statistics
-        print("\nToken Usage Statistics:")
-        print(f"Total input tokens: {self.token_counts['input']}")
-        print(f"Total output tokens: {self.token_counts['output']}")
-        print(f"Cache creation tokens: {self.token_counts['cache_creation']}")
-        print(f"Cache read tokens: {self.token_counts['cache_read']}")
-        
-        cache_savings = (self.token_counts['cache_read'] / 
-                        (self.token_counts['input'] + self.token_counts['cache_read'] + self.token_counts['cache_creation'])) * 100
-        print(f"Cache savings: {cache_savings:.2f}% (90% discount on cached tokens)")
+        self.chunks.extend(documents)
+        print(f"Added {len(documents)} documents to both databases")
 
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for similar documents"""
+    def search(self, query: str, k: int = 5, semantic_weight: float = 0.7) -> List[Dict[str, Any]]:
+        """Hybrid search combining embedding similarity and BM25"""
+        # Get embedding search results
         if query in self.query_cache:
             query_embedding = self.query_cache[query]
         else:
-            query_embedding = self.voyage_client.embed([query], model="voyage-2").embeddings[0]
+            response = self.embeddings_client.embeddings.create(
+                model="/e5",  # or your local model name
+                input=[query]
+            )
+            query_embedding = response.data[0].embedding
             self.query_cache[query] = query_embedding
 
+        # Calculate embedding similarities
         similarities = np.dot(self.embeddings, query_embedding)
-        top_indices = np.argsort(similarities)[::-1][:k]
+        top_semantic_indices = np.argsort(similarities)[::-1][:k*2]  # Get more results for fusion
         
-        results = []
-        for idx in top_indices:
-            results.append({
+        # Get BM25 search results
+        es_response = self.es_client.search(
+            index=self.index_name,
+            body={
+                "query": {
+                    "match": {
+                        "content": query
+                    }
+                },
+                "size": k*2  # Get more results for fusion
+            }
+        )
+        
+        # Prepare results for rank fusion
+        semantic_results = [
+            {
                 'content': self.chunks[idx]['content'],
                 'metadata': self.chunks[idx]['metadata'],
-                'similarity': float(similarities[idx])
-            })
+                'score': float(similarities[idx]),
+                'source': 'semantic'
+            }
+            for idx in top_semantic_indices
+        ]
         
-        return results
+        bm25_results = [
+            {
+                'content': hit['_source']['content'],
+                'metadata': hit['_source']['metadata'],
+                'score': hit['_score'],
+                'source': 'bm25'
+            }
+            for hit in es_response['hits']['hits']
+        ]
+        
+        # Combine and normalize scores
+        all_results = semantic_results + bm25_results
+        
+        # Use content as key to remove duplicates and combine scores
+        combined_results = {}
+        for result in all_results:
+            content = result['content']
+            if content not in combined_results:
+                combined_results[content] = {
+                    'content': content,
+                    'metadata': result['metadata'],
+                    'semantic_score': 0.0,
+                    'bm25_score': 0.0
+                }
+            
+            if result['source'] == 'semantic':
+                combined_results[content]['semantic_score'] = result['score']
+            else:
+                combined_results[content]['bm25_score'] = result['score']
+        
+        # Normalize scores and compute final score
+        max_semantic = max(r['semantic_score'] for r in combined_results.values())
+        max_bm25 = max(r['bm25_score'] for r in combined_results.values())
+        
+        for result in combined_results.values():
+            norm_semantic = result['semantic_score'] / max_semantic if max_semantic > 0 else 0
+            norm_bm25 = result['bm25_score'] / max_bm25 if max_bm25 > 0 else 0
+            result['final_score'] = (semantic_weight * norm_semantic + 
+                                   (1 - semantic_weight) * norm_bm25)
+        
+        # Sort by final score and return top k
+        final_results = sorted(
+            combined_results.values(),
+            key=lambda x: x['final_score'],
+            reverse=True
+        )[:k]
+        
+        return final_results
 
-class ContextualRAGSystem:
-    """RAG system using contextual embeddings"""
+class HybridRAGSystem:
+    """RAG system using hybrid search"""
     
-    def __init__(self):
-        self.vector_db = ContextualVectorDB()
-        self.llm = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    def __init__(self, 
+                 embeddings_url: str = None,
+                 llm_url: str = None,
+                 api_key: str = None):
+        # Initialize vector database with local embeddings endpoint
+        self.vector_db = HybridVectorDB(base_url=embeddings_url, api_key=api_key)
+        
+        # Initialize OpenAI client for local LLM endpoint
+        if llm_url is None:
+            llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8001")
+        if api_key is None:
+            api_key = os.getenv("LOCAL_API_KEY", "dummy-key")
+            
+        self.llm = openai.OpenAI(
+            base_url=llm_url,
+            api_key=api_key
+        )
         self.current_file = None
-        self.source_text = None
 
     def load_document(self, file_path: str):
         """Load a document into the RAG system"""
         print(f"Loading document: {file_path}")
         self.current_file = file_path
-        
-        # Load the entire document first for context
-        with open(file_path, 'r', encoding='utf-8') as f:
-            self.source_text = f.read()
-        
-        # Then load chunks
         chunks = DocumentLoader.load_file(file_path)
-        self.vector_db.add_documents(chunks, self.source_text)
+        self.vector_db.add_documents(chunks)
         print("Document loaded successfully")
 
     def query(self, question: str, k: int = 5) -> str:
         """Query the RAG system"""
+        # Retrieve relevant chunks using hybrid search
         relevant_chunks = self.vector_db.search(question, k=k)
         
-        # Include both content and context in the prompt
+        # Prepare context for the LLM
         context = "\n\n".join([
-            f"Content {i+1}:\n{chunk['content']}\nContext: {chunk['metadata']['context']}"
+            f"Content {i+1} (Score: {chunk['final_score']:.3f}):\n{chunk['content']}"
             for i, chunk in enumerate(relevant_chunks)
         ])
         
+        # Create the prompt
         prompt = f"""Here is some context information to help answer a question:
 
 {context}
@@ -339,18 +379,25 @@ Question: {question}
 
 Please provide a clear and concise answer based on the context provided. If the context doesn't contain enough information to answer the question fully, please indicate that."""
 
-        response = self.llm.messages.create(
-            model="claude-3-haiku-20240307",
+        # Get response from local LLM using OpenAI-compatible endpoint
+        response = self.llm.chat.completions.create(
+            model="/llama-3.1-70b",  # Use your local model name
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=1024,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}]
+            temperature=0
         )
         
-        return response.content[0].text
+        return response.choices[0].message.content
 
 def main():
-    # Initialize RAG system
-    rag = ContextualRAGSystem()
+    # Initialize RAG system with local endpoints
+    rag = HybridRAGSystem(
+        embeddings_url=os.getenv("LOCAL_EMBEDDINGS_URL", "http://localhost:8000"),
+        llm_url=os.getenv("LOCAL_LLM_URL", "http://localhost:8001"),
+        api_key=os.getenv("LOCAL_API_KEY", "dummy-key")
+    )
     
     # Show available files
     data_dir = "data"

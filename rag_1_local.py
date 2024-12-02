@@ -4,11 +4,10 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Any, Union
 from dotenv import load_dotenv
-import voyageai
-import anthropic
 from pathlib import Path
 import PyPDF2
 from tqdm import tqdm
+import openai
 
 # Load environment variables
 load_dotenv()
@@ -159,132 +158,59 @@ class DocumentLoader:
         
         return chunks
 
-class ContextualVectorDB:
-    """Vector database with contextual embeddings"""
+class VectorDB:
+    """Simple vector database for storing and searching embeddings"""
     
-    def __init__(self, api_key: str = None, anthropic_api_key: str = None):
+    def __init__(self, base_url: str = None, api_key: str = None):
+        if base_url is None:
+            base_url = os.getenv("LOCAL_EMBEDDINGS_URL", "http://localhost:8000")
         if api_key is None:
-            api_key = os.getenv("VOYAGE_API_KEY")
-        if anthropic_api_key is None:
-            anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+            api_key = os.getenv("LOCAL_API_KEY", "dummy-key")
             
-        self.voyage_client = voyageai.Client(api_key=api_key)
-        self.anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
+        # Configure OpenAI client for local endpoint
+        self.client = openai.OpenAI(
+            base_url=base_url,
+            api_key=api_key
+        )
         self.embeddings = []
         self.chunks = []
         self.query_cache = {}
-        
-        # Track token usage for cost analysis
-        self.token_counts = {
-            'input': 0,
-            'output': 0,
-            'cache_read': 0,
-            'cache_creation': 0
-        }
 
-    def _generate_context(self, document: str, chunk: str) -> str:
-        """Generate contextual description for a chunk using Claude"""
-        DOCUMENT_CONTEXT_PROMPT = """
-        <document>
-        {doc_content}
-        </document>
-        """
-
-        CHUNK_CONTEXT_PROMPT = """
-        Here is the chunk we want to situate within the whole document
-        <chunk>
-        {chunk_content}
-        </chunk>
-
-        Please give a short succinct context to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk.
-        Answer only with the succinct context and nothing else.
-        """
-
-        response = self.anthropic_client.beta.prompt_caching.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=1024,
-            temperature=0.0,
-            messages=[
-                {
-                    "role": "user", 
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": DOCUMENT_CONTEXT_PROMPT.format(doc_content=document),
-                            "cache_control": {"type": "ephemeral"}
-                        },
-                        {
-                            "type": "text",
-                            "text": CHUNK_CONTEXT_PROMPT.format(chunk_content=chunk),
-                        }
-                    ]
-                }
-            ],
-            extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"}
-        )
-        
-        # Update token counts
-        self.token_counts['input'] += response.usage.input_tokens
-        self.token_counts['output'] += response.usage.output_tokens
-        self.token_counts['cache_read'] += response.usage.cache_read_input_tokens
-        self.token_counts['cache_creation'] += response.usage.cache_creation_input_tokens
-        
-        return response.content[0].text
-
-    def add_documents(self, documents: List[Dict[str, str]], source_text: str):
-        """Add documents with contextual embeddings"""
-        print("Processing documents and generating contextual embeddings...")
-        texts_to_embed = []
-        processed_chunks = []
-        
-        for doc in tqdm(documents, desc="Generating context"):
-            # Generate contextual description
-            context = self._generate_context(source_text, doc['content'])
-            
-            # Combine original content with context
-            contextualized_text = f"{doc['content']}\n\nContext: {context}"
-            texts_to_embed.append(contextualized_text)
-            
-            # Store enhanced metadata
-            enhanced_chunk = {
-                'content': doc['content'],
-                'metadata': {
-                    **doc['metadata'],
-                    'context': context
-                }
-            }
-            processed_chunks.append(enhanced_chunk)
+    def add_documents(self, documents: List[Dict[str, str]]):
+        """Add documents to the vector database"""
+        print("Processing documents...")
+        texts_to_embed = [doc['content'] for doc in documents]
         
         print("Generating embeddings...")
         batch_size = 128
-        with tqdm(total=len(texts_to_embed), desc="Embedding chunks") as pbar:
+        with tqdm(total=len(texts_to_embed)) as pbar:
             for i in range(0, len(texts_to_embed), batch_size):
                 batch = texts_to_embed[i:i + batch_size]
-                batch_embeddings = self.voyage_client.embed(batch, model="voyage-2").embeddings
+                # Use OpenAI-compatible embeddings endpoint
+                response = self.client.embeddings.create(
+                    model="/e5",  # or your local model name
+                    input=batch
+                )
+                batch_embeddings = [item.embedding for item in response.data]
                 self.embeddings.extend(batch_embeddings)
                 pbar.update(len(batch))
         
-        self.chunks.extend(processed_chunks)
-        
-        # Print token usage statistics
-        print("\nToken Usage Statistics:")
-        print(f"Total input tokens: {self.token_counts['input']}")
-        print(f"Total output tokens: {self.token_counts['output']}")
-        print(f"Cache creation tokens: {self.token_counts['cache_creation']}")
-        print(f"Cache read tokens: {self.token_counts['cache_read']}")
-        
-        cache_savings = (self.token_counts['cache_read'] / 
-                        (self.token_counts['input'] + self.token_counts['cache_read'] + self.token_counts['cache_creation'])) * 100
-        print(f"Cache savings: {cache_savings:.2f}% (90% discount on cached tokens)")
+        self.chunks.extend(documents)
+        print(f"Added {len(documents)} documents to the database")
 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
         """Search for similar documents"""
         if query in self.query_cache:
             query_embedding = self.query_cache[query]
         else:
-            query_embedding = self.voyage_client.embed([query], model="voyage-2").embeddings[0]
+            response = self.client.embeddings.create(
+                model="/e5",  # or your local model name
+                input=[query]
+            )
+            query_embedding = response.data[0].embedding
             self.query_cache[query] = query_embedding
 
+        # Calculate similarities
         similarities = np.dot(self.embeddings, query_embedding)
         top_indices = np.argsort(similarities)[::-1][:k]
         
@@ -298,39 +224,47 @@ class ContextualVectorDB:
         
         return results
 
-class ContextualRAGSystem:
-    """RAG system using contextual embeddings"""
+class RAGSystem:
+    """Main RAG system combining vector database and LLM"""
     
-    def __init__(self):
-        self.vector_db = ContextualVectorDB()
-        self.llm = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+    def __init__(self, 
+                 embeddings_url: str = None,
+                 llm_url: str = None,
+                 api_key: str = None):
+        self.vector_db = VectorDB(base_url=embeddings_url, api_key=api_key)
+        
+        # Configure OpenAI client for local LLM endpoint
+        if llm_url is None:
+            llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8001")
+        if api_key is None:
+            api_key = os.getenv("LOCAL_API_KEY", "dummy-key")
+            
+        self.llm = openai.OpenAI(
+            base_url=llm_url,
+            api_key=api_key
+        )
         self.current_file = None
-        self.source_text = None
 
     def load_document(self, file_path: str):
         """Load a document into the RAG system"""
         print(f"Loading document: {file_path}")
         self.current_file = file_path
-        
-        # Load the entire document first for context
-        with open(file_path, 'r', encoding='utf-8') as f:
-            self.source_text = f.read()
-        
-        # Then load chunks
         chunks = DocumentLoader.load_file(file_path)
-        self.vector_db.add_documents(chunks, self.source_text)
+        self.vector_db.add_documents(chunks)
         print("Document loaded successfully")
 
     def query(self, question: str, k: int = 5) -> str:
         """Query the RAG system"""
+        # Retrieve relevant chunks
         relevant_chunks = self.vector_db.search(question, k=k)
         
-        # Include both content and context in the prompt
+        # Prepare context for the LLM
         context = "\n\n".join([
-            f"Content {i+1}:\n{chunk['content']}\nContext: {chunk['metadata']['context']}"
+            f"Content {i+1}:\n{chunk['content']}"
             for i, chunk in enumerate(relevant_chunks)
         ])
         
+        # Create the prompt
         prompt = f"""Here is some context information to help answer a question:
 
 {context}
@@ -339,18 +273,25 @@ Question: {question}
 
 Please provide a clear and concise answer based on the context provided. If the context doesn't contain enough information to answer the question fully, please indicate that."""
 
-        response = self.llm.messages.create(
-            model="claude-3-haiku-20240307",
+        # Get response from local LLM using OpenAI-compatible endpoint
+        response = self.llm.chat.completions.create(
+            model="/llama-3.1-70b",  # Use your local model name
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=1024,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}]
+            temperature=0
         )
         
-        return response.content[0].text
+        return response.choices[0].message.content
 
 def main():
-    # Initialize RAG system
-    rag = ContextualRAGSystem()
+    # Initialize RAG system with local endpoints
+    rag = RAGSystem(
+        embeddings_url=os.getenv("LOCAL_EMBEDDINGS_URL", "http://localhost:8000"),
+        llm_url=os.getenv("LOCAL_LLM_URL", "http://localhost:8001"),
+        api_key=os.getenv("LOCAL_API_KEY", "dummy-key")
+    )
     
     # Show available files
     data_dir = "data"
@@ -383,6 +324,7 @@ def main():
         
         response = rag.query(question)
         print("\nResponse:", response)
+
 
 if __name__ == "__main__":
     main()
