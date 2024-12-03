@@ -1,0 +1,6 @@
+python-dotenv
+psycopg2
+black
+pgvector
+PyPDF2
+requests
