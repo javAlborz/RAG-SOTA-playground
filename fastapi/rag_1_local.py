@@ -285,7 +285,7 @@ Please provide a clear and concise answer based on the context provided. If the 
         
         return response.choices[0].message.content
 
-def rag_init()
+def rag_init():
     rag = RAGSystem(
             embeddings_url=os.getenv("LOCAL_EMBEDDINGS_URL", "http://localhost:8000"),
             llm_url=os.getenv("LOCAL_LLM_URL", "http://localhost:8001"),
@@ -319,7 +319,7 @@ def do_embedding(rag):
 
 def make_query(rag, question):
     response = rag.query(question)
-    print("\nResponse:", response)
+    return response
 
 
 
