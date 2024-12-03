@@ -15,7 +15,7 @@ from rag1 import DocumentLoader
 # from rag3 import RerankedHybridVectorDB as VectorDB
 # from rag4 import ContextualVectorDB as VectorDB
 # from rag_1_local import VectorDB
-from rag_1_local_pg import VectorDB
+from rag_2_local_pg import HybridVectorDB as VectorDB
 
 
 class RAGEvaluator:
