@@ -222,4 +222,7 @@ class PGVector:
         """Cleanup on deletion"""
         self.close_connection()
 
-#</PGVECTOR-CLASS>
+
+if __name__== "__main__":
+    pgvector = PGVector()
+    pgvector.setup_database()
