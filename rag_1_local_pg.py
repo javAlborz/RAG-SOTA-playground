@@ -1,3 +1,4 @@
+#<PGVECTOR-SCRIPT>
 import os
 import json
 import pandas as pd
@@ -161,7 +162,7 @@ class DocumentLoader:
         return chunks
 
 class VectorDB:
-    """Simple vector database for storing and searching embeddings"""
+    """Vector database using PostgreSQL for storing and searching embeddings"""
     
     def __init__(self, base_url: str = None, api_key: str = None):
         if base_url is None:
@@ -174,11 +175,10 @@ class VectorDB:
             base_url=base_url,
             api_key=api_key
         )
-        self.embeddings = []
-        self.chunks = []
+        
+        # Initialize PGVector for persistent storage
+        self.vector_store = PGVector()
         self.query_cache = {}
-
-        self.vector_store = PGVector()  # Assuming PGVector is used for vector storage
 
     def add_documents(self, documents: List[Dict[str, str]]):
         """Add documents to the vector database"""
@@ -190,44 +190,67 @@ class VectorDB:
         with tqdm(total=len(texts_to_embed)) as pbar:
             for i in range(0, len(texts_to_embed), batch_size):
                 batch = texts_to_embed[i:i + batch_size]
+                batch_documents = documents[i:i + batch_size]
+                
                 # Use OpenAI-compatible embeddings endpoint
                 response = self.client.embeddings.create(
                     model="/e5",  # or your local model name
                     input=batch
                 )
-                batch_embeddings = [item.embedding for item in response.data]
-                self.embeddings.extend(batch_embeddings)
-                pbar.update(len(batch))
+                
+                # Prepare embeddings for database insertion
+                batch_embeddings = []
+                for j, embedding_data in enumerate(response.data):
+                    doc = batch_documents[j]
+                    batch_embeddings.append((
+                        doc['content'],                # document text
+                        list(embedding_data.embedding),  # convert numpy array to list
+                        doc['metadata']                # metadata
+                    ))
+                
+                # Debug print
+                print(f"\nPrepared batch of {len(batch_embeddings)} embeddings")
+                print(f"Sample embedding length: {len(batch_embeddings[0][1])}")
+                print(f"Sample metadata: {batch_embeddings[0][2]}")
+                
+                # Insert into PostgreSQL
                 self.vector_store.insert_embeddings(batch_embeddings)
-
-        self.chunks.extend(documents)
+                pbar.update(len(batch))
+        
         print(f"Added {len(documents)} documents to the database")
 
     def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for similar documents"""
-        if query in self.query_cache:
-            query_embedding = self.query_cache[query]
-        else:
-            response = self.client.embeddings.create(
-                model="/e5",  # or your local model name
-                input=[query]
-            )
-            query_embedding = response.data[0].embedding
-            self.query_cache[query] = query_embedding
+        """Search for similar documents using PostgreSQL vector similarity search"""
+        try:
+            if query in self.query_cache:
+                query_embedding = self.query_cache[query]
+            else:
+                response = self.client.embeddings.create(
+                    model="/e5",
+                    input=[query]
+                )
+                query_embedding = list(response.data[0].embedding)  # convert to list
+                self.query_cache[query] = query_embedding
 
-        # Calculate similarities
-        similarities = np.dot(self.embeddings, query_embedding)
-        top_indices = np.argsort(similarities)[::-1][:k]
-        
-        results = []
-        for idx in top_indices:
-            results.append({
-                'content': self.chunks[idx]['content'],
-                'metadata': self.chunks[idx]['metadata'],
-                'similarity': float(similarities[idx])
-            })
-        
-        return results
+            print(f"\nGenerated query embedding of length: {len(query_embedding)}")
+
+            # Use PGVector's search functionality
+            results = self.vector_store.search_similar(
+                query_embedding,
+                limit=k,
+                threshold=0.3  # Lowered threshold for testing
+            )
+            
+            print(f"Found {len(results)} matches in database")
+            
+            if not results:
+                print("Warning: No similar documents found in the database")
+                
+            return results
+            
+        except Exception as e:
+            print(f"Error in vector search: {str(e)}")
+            raise  # Re-raise to see full traceback
 
 class RAGSystem:
     """Main RAG system combining vector database and LLM"""
@@ -263,11 +286,20 @@ class RAGSystem:
         # Retrieve relevant chunks
         relevant_chunks = self.vector_db.search(question, k=k)
         
+        # Debug print to verify chunks are being retrieved
+        print(f"\nFound {len(relevant_chunks)} relevant chunks")
+        
+        if not relevant_chunks:
+            return "No relevant information found in the documents to answer this question."
+        
         # Prepare context for the LLM
         context = "\n\n".join([
             f"Content {i+1}:\n{chunk['content']}"
             for i, chunk in enumerate(relevant_chunks)
         ])
+        
+        # Debug print to verify context length
+        print(f"Context length: {len(context)} characters")
         
         # Create the prompt
         prompt = f"""Here is some context information to help answer a question:
@@ -279,17 +311,21 @@ Question: {question}
 Please provide a clear and concise answer based on the context provided. If the context doesn't contain enough information to answer the question fully, please indicate that."""
 
         # Get response from local LLM using OpenAI-compatible endpoint
-        response = self.llm.chat.completions.create(
-            model="/llama-3.1-70b",  # Use your local model name
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1024,
-            temperature=0
-        )
-        
-        return response.choices[0].message.content
-
+        try:
+            response = self.llm.chat.completions.create(
+                model="/llama-3.1-70b",  # Use your local model name
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that answers questions based on the provided context."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1024,
+                temperature=0
+            )
+            
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"Error getting LLM response: {str(e)}")
+            return f"Error: Unable to generate response - {str(e)}"
 def main():
     # Initialize RAG system with local endpoints
     rag = RAGSystem(
@@ -333,3 +369,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+#</PGVECTOR-SCRIPT>

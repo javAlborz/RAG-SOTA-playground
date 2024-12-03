@@ -1,18 +1,21 @@
-#<IN-MEMORY-SCRIPT>
 import os
 import json
 import pandas as pd
 import numpy as np
 from typing import List, Dict, Any, Union
 from dotenv import load_dotenv
+import openai
 from pathlib import Path
 import PyPDF2
 from tqdm import tqdm
-import openai
+from elasticsearch import Elasticsearch
+from elasticsearch.helpers import bulk
+from my_pgvector import PGVector
 
 # Load environment variables
 load_dotenv()
 
+# DocumentLoader class remains unchanged
 class DocumentLoader:
     """Handles loading and preprocessing of different document types"""
     
@@ -159,82 +162,203 @@ class DocumentLoader:
         
         return chunks
 
-class VectorDB:
-    """Simple vector database for storing and searching embeddings"""
+class HybridVectorDB:
+    """Vector database with hybrid search capabilities (PostgreSQL embeddings + Elasticsearch BM25)"""
     
     def __init__(self, base_url: str = None, api_key: str = None):
+        # Initialize OpenAI client for local embeddings
         if base_url is None:
             base_url = os.getenv("LOCAL_EMBEDDINGS_URL", "http://localhost:8000")
         if api_key is None:
             api_key = os.getenv("LOCAL_API_KEY", "dummy-key")
             
-        # Configure OpenAI client for local endpoint
-        self.client = openai.OpenAI(
+        self.embeddings_client = openai.OpenAI(
             base_url=base_url,
             api_key=api_key
         )
-        self.embeddings = []
-        self.chunks = []
+        
+        # Initialize PostgreSQL vector store for embeddings
+        self.vector_store = PGVector()
+        
+        # Initialize Elasticsearch client for BM25
+        self.es_client = Elasticsearch("http://localhost:9200")
+        self.index_name = "hybrid_search_index"
+        self.create_es_index()
+        
         self.query_cache = {}
 
+    def create_es_index(self):
+        """Create Elasticsearch index with appropriate settings"""
+        if not self.es_client.indices.exists(index=self.index_name):
+            index_settings = {
+                "settings": {
+                    "analysis": {"analyzer": {"default": {"type": "english"}}},
+                    "similarity": {"default": {"type": "BM25"}},
+                },
+                "mappings": {
+                    "properties": {
+                        "content": {"type": "text", "analyzer": "english"},
+                        "metadata": {"type": "object", "enabled": True}
+                    }
+                }
+            }
+            self.es_client.indices.create(index=self.index_name, body=index_settings)
+
     def add_documents(self, documents: List[Dict[str, str]]):
-        """Add documents to the vector database"""
+        """Add documents to both PostgreSQL and Elasticsearch"""
         print("Processing documents...")
-        texts_to_embed = [doc['content'] for doc in documents]
         
+        # Generate embeddings using local endpoint
+        texts_to_embed = [doc['content'] for doc in documents]
         print("Generating embeddings...")
         batch_size = 128
-        with tqdm(total=len(texts_to_embed)) as pbar:
+        
+        with tqdm(total=len(texts_to_embed), desc="Embedding documents") as pbar:
             for i in range(0, len(texts_to_embed), batch_size):
                 batch = texts_to_embed[i:i + batch_size]
-                # Use OpenAI-compatible embeddings endpoint
-                response = self.client.embeddings.create(
+                batch_documents = documents[i:i + batch_size]
+                
+                # Generate embeddings
+                response = self.embeddings_client.embeddings.create(
                     model="/e5",  # or your local model name
                     input=batch
                 )
-                batch_embeddings = [item.embedding for item in response.data]
-                self.embeddings.extend(batch_embeddings)
+                
+                # Prepare embeddings for PostgreSQL
+                batch_embeddings = []
+                for j, embedding_data in enumerate(response.data):
+                    doc = batch_documents[j]
+                    batch_embeddings.append((
+                        doc['content'],
+                        list(embedding_data.embedding),
+                        doc['metadata']
+                    ))
+                
+                # Insert batch into PostgreSQL
+                self.vector_store.insert_embeddings(batch_embeddings)
                 pbar.update(len(batch))
         
-        self.chunks.extend(documents)
-        print(f"Added {len(documents)} documents to the database")
+        # Add to Elasticsearch
+        print("Adding documents to Elasticsearch...")
+        actions = [
+            {
+                "_index": self.index_name,
+                "_source": {
+                    "content": doc['content'],
+                    "metadata": doc['metadata']
+                }
+            }
+            for doc in documents
+        ]
+        bulk(self.es_client, actions)
+        self.es_client.indices.refresh(index=self.index_name)
+        
+        print(f"Added {len(documents)} documents to both databases")
 
-    def search(self, query: str, k: int = 5) -> List[Dict[str, Any]]:
-        """Search for similar documents"""
+    def search(self, query: str, k: int = 5, semantic_weight: float = 0.7) -> List[Dict[str, Any]]:
+        """Hybrid search combining PostgreSQL vector similarity and Elasticsearch BM25"""
+        # Get semantic search results from PostgreSQL
         if query in self.query_cache:
             query_embedding = self.query_cache[query]
         else:
-            response = self.client.embeddings.create(
+            response = self.embeddings_client.embeddings.create(
                 model="/e5",  # or your local model name
                 input=[query]
             )
-            query_embedding = response.data[0].embedding
+            query_embedding = list(response.data[0].embedding)
             self.query_cache[query] = query_embedding
 
-        # Calculate similarities
-        similarities = np.dot(self.embeddings, query_embedding)
-        top_indices = np.argsort(similarities)[::-1][:k]
+        semantic_results = self.vector_store.search_similar(
+            query_embedding,
+            limit=k*2,  # Get more results for fusion
+            threshold=0.3
+        )
         
-        results = []
-        for idx in top_indices:
-            results.append({
-                'content': self.chunks[idx]['content'],
-                'metadata': self.chunks[idx]['metadata'],
-                'similarity': float(similarities[idx])
-            })
+        # Get BM25 results from Elasticsearch
+        es_response = self.es_client.search(
+            index=self.index_name,
+            body={
+                "query": {
+                    "match": {
+                        "content": query
+                    }
+                },
+                "size": k*2  # Get more results for fusion
+            }
+        )
         
-        return results
+        # Prepare BM25 results
+        bm25_results = [
+            {
+                'content': hit['_source']['content'],
+                'metadata': hit['_source']['metadata'],
+                'score': hit['_score'],
+                'source': 'bm25'
+            }
+            for hit in es_response['hits']['hits']
+        ]
+        
+        # Format semantic results
+        semantic_results = [
+            {
+                'content': result['content'],
+                'metadata': result['metadata'],
+                'score': result['similarity'],
+                'source': 'semantic'
+            }
+            for result in semantic_results
+        ]
+        
+        # Combine and normalize scores
+        all_results = semantic_results + bm25_results
+        
+        # Use content as key to remove duplicates and combine scores
+        combined_results = {}
+        for result in all_results:
+            content = result['content']
+            if content not in combined_results:
+                combined_results[content] = {
+                    'content': content,
+                    'metadata': result['metadata'],
+                    'semantic_score': 0.0,
+                    'bm25_score': 0.0
+                }
+            
+            if result['source'] == 'semantic':
+                combined_results[content]['semantic_score'] = result['score']
+            else:
+                combined_results[content]['bm25_score'] = result['score']
+        
+        # Normalize scores and compute final score
+        max_semantic = max(r['semantic_score'] for r in combined_results.values())
+        max_bm25 = max(r['bm25_score'] for r in combined_results.values())
+        
+        for result in combined_results.values():
+            norm_semantic = result['semantic_score'] / max_semantic if max_semantic > 0 else 0
+            norm_bm25 = result['bm25_score'] / max_bm25 if max_bm25 > 0 else 0
+            result['final_score'] = (semantic_weight * norm_semantic + 
+                                   (1 - semantic_weight) * norm_bm25)
+        
+        # Sort by final score and return top k
+        final_results = sorted(
+            combined_results.values(),
+            key=lambda x: x['final_score'],
+            reverse=True
+        )[:k]
+        
+        return final_results
 
-class RAGSystem:
-    """Main RAG system combining vector database and LLM"""
+class HybridRAGSystem:
+    """RAG system using hybrid search"""
     
     def __init__(self, 
                  embeddings_url: str = None,
                  llm_url: str = None,
                  api_key: str = None):
-        self.vector_db = VectorDB(base_url=embeddings_url, api_key=api_key)
+        # Initialize vector database with local embeddings endpoint
+        self.vector_db = HybridVectorDB(base_url=embeddings_url, api_key=api_key)
         
-        # Configure OpenAI client for local LLM endpoint
+        # Initialize OpenAI client for local LLM endpoint
         if llm_url is None:
             llm_url = os.getenv("LOCAL_LLM_URL", "http://localhost:8001")
         if api_key is None:
@@ -256,12 +380,12 @@ class RAGSystem:
 
     def query(self, question: str, k: int = 5) -> str:
         """Query the RAG system"""
-        # Retrieve relevant chunks
+        # Retrieve relevant chunks using hybrid search
         relevant_chunks = self.vector_db.search(question, k=k)
         
         # Prepare context for the LLM
         context = "\n\n".join([
-            f"Content {i+1}:\n{chunk['content']}"
+            f"Content {i+1} (Score: {chunk['final_score']:.3f}):\n{chunk['content']}"
             for i, chunk in enumerate(relevant_chunks)
         ])
         
@@ -288,7 +412,7 @@ Please provide a clear and concise answer based on the context provided. If the 
 
 def main():
     # Initialize RAG system with local endpoints
-    rag = RAGSystem(
+    rag = HybridRAGSystem(
         embeddings_url=os.getenv("LOCAL_EMBEDDINGS_URL", "http://localhost:8000"),
         llm_url=os.getenv("LOCAL_LLM_URL", "http://localhost:8001"),
         api_key=os.getenv("LOCAL_API_KEY", "dummy-key")
@@ -326,9 +450,5 @@ def main():
         response = rag.query(question)
         print("\nResponse:", response)
 
-
 if __name__ == "__main__":
     main()
-
-
-#</IN-MEMORY-SCRIPT>
