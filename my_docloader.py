@@ -1,3 +1,9 @@
+from typing import List, Dict
+from pathlib import Path
+import pandas as pd
+import json
+import PyPDF2
+
 class DocumentLoader:
     """Handles loading and preprocessing of different document types"""
     
