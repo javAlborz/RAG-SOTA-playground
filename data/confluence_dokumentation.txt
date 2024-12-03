@@ -1,0 +1,60 @@
+Dokumentation
+
+rag_1_local og rag_2_local har begrænset kontekst og kan derfor ikke svare på særligt mange ting angående persondata.
+Spørgsmål stillet indebærer bl.a: Hvor mange personer er tandlæger; Hvilket job har X; 
+(Specifikt til individ og spørgsmål som går på tværs af individer)
+
+Brugerrejsen
+
+Spørgsmål:
+
+1.
+a. Hvor mange self-service niveauer er der?
+b. Hvad er self-service niveau 3?
+
+2.
+Hvad kan du fortælle mig om udvikling på analyseplatformen?
+
+3.
+Hvordan opretter jeg et projekt, og hvad sikrer produktionslægning?
+
+
+
+rag_1_local resultater:
+
+1a. Korrekt
+1b. Korrekt
+2. Fyldestgørende.
+3. Fyldestgørende.
+
+rag_2_local resultater:
+
+1a. Korrekt
+
+1. Niveau 1 - ingen brug af Analyseplatform udviklingsserver eller ML Center of Excellence (CoE) infrastruktur
+2. Niveau 2 - Adgang til Analyseplatformens udviklingsserver uden produktionslægning
+3. Niveau 3 - Fuld adgang til Analyseplatformens infrastruktur med produktionslægning
+
+
+1b. Korrekt
+
+Response: Ifølge Content 1, Self-service niveau 3 giver "Fuld adgang til Analyseplatformens infrastruktur med produktionslægning".
+
+
+2. Fyldestgørende.
+
+Response: På Analyseplatformen er udvikling af modeller og analyser struktureret og følger nogle bestemte principper og procedurer. Her er nogle af de vigtigste punkter:
+
+* Udvikling vs. Produktionslægning: Der er en tydelig skelnen mellem udvikling og produktionslægning. Modeller og analyser skal ikke køres i produktion på en udviklingsplatform, men skal i stedet oprettes i en produktionspipeline.
+* Projektet skal oprettes i Git-serveren og følge standarder og skabeloner for udvikling.
+* Udviklere kan selv udvikle en pakke og få den produktionslagt, eller de kan få hjælp fra et Data Scientist-team.
+* Der er en rollebaseret adgangsstyring på platformen, hvor hvert projekt har en udvikler- og en bruger-rolle.
+* Der er en FAQ-sektion på Confluence, hvor udviklere kan finde svar på ofte stillede spørgsmål.
+
+3. Fyldestgørende.
+
+Response: For at oprette et projekt på Analyseplatformen, skal du først have oprettet et Self Service Projekt. Dette kan gøres ved at udfylde en MitIT-blanket, hvor du skal angive blandt andet ansvarlig procesejer, formålet med at behandle data, behandlingshjemmel og hvilke kategorier af personoplysninger der indgår i modellen.
+
+Produktionslægning sikrer mange væsentlige elementer, herunder overblik over hvilke modeller/analyser/rapporter der kører i produktion, historik og versionskontrol, dependency control, ensartede metoder/udviklingsprincipper, sikkerhed omkring dataadgange og data opbevaring, automatisering og en ansartet måde at udstille de udviklede løsninger på.
+
+Det er ikke muligt at give en mere detaljeret beskrivelse af produktionslægningsprocessen baseret på den tilgængelige kontekst, da der ikke er nok information omkring de specifikke trin og procedurer, der skal følges.
