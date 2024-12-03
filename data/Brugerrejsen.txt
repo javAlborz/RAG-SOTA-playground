@@ -1,0 +1,105 @@
+﻿Brugerrejsen - Sådan kommer du i gang
+Denne side gennemgår brugerrejsen af et projekt/self service projekt på Analyseplatformen fra projektoprettelsen over adgangsstyringen af projekter og adgang til data, til produktionslægning og dekommisionering.
+• Projektoprettelse
+• Adgangsstyring af projekter på Analyseplatformen
+• Bestilling af adgange til data
+• Andre bestillinger i AP
+• Udvikling 
+o Compliancekrav
+• Produktionslægning 
+o Drift
+• Dekommissionering
+
+Projektoprettelse
+For at få adgang til Analyseplatformen skal man oprette et projekt, enten et Self Service projekt eller et internt projekt (Center for Avanceret Analyse, UFST).
+Self Service konceptet henvender sig til brugere i de andre styrelser i skatteforvaltningen, samt andre afdelinger i UFST end Center for Avanceret Analyse.
+For at kunne udvikle på Analyseplatformen, skal du først have oprettet et Self Service Projekt. Læs mere om self service her.
+• Oprettelsen af et Self service projekt kan bestilles med denne MitIT-blanket.
+• Blandt andet skal der angives: 
+o Ansvarlig procesejer (personaleleder)
+o Formålet med at behandle data
+o Behandlingshjemmel
+o Hvilke kategorier af personoplysninger der indgår i modellen
+o Hvilke kategorier registrerede tilhører
+o Varigheden af behandlingen samt de forventede tidsfrister for sletning af personoplysninger
+o Sekundær dobbeltgodkender til Omada
+o Self service-niveau 
+• Niveau 1 -  ingen brug af Analyseplatform udviklingsserver eller ML Center of Excellence (CoE) infrastruktur
+• Niveau 2 - Adgang til Analyseplatformens udviklingsserver uden produktionslægning
+• Niveau 3 - Fuld adgang til Analyseplatformens infrastruktur med produktionslægning
+• Internt projekt i Center for Avanceret analyse
+o Oprettelse af adgangsgivende roller (Kun Niveau 2 og 3 samt interne projekter) 
+• For Niveau 2, 3 og interne projekter skal der oprettes en Udvikler-rolle
+• For Niveau 3 og interne projekter skal der desuden oprettes en Bruger-rolle
+• Der er muligt at oprette andre roller hvis der er behov for det.
+o Oplysninger om projektets første repository
+For niveau 3 projekter vil der efter indmeldelse af projektet blive indkaldt til et møde med data scientists fra UFSTs Machine Learning Center of Excellence (ML CoE). Ved dette møde vil der blive givet hjælp med at komme i gang med at bruge platformen, og der vil være mulighed for at udveksle erfaringer med  lignende løsninger på platformen.
+
+Adgangsstyring af projekter på Analyseplatformen
+På Analyseplatformen gør vi brug af en rollebaseret adgangsstyring.
+Hvert projekt bliver født med en udvikler- og en bruger-rolle som giver forskellige adgange til projektet og som kan søges igennem Omada.
+Det er selvfølgelig muligt at tilføje flere roller hvis der er behov for det.
+Du kan læse mere om den rollebaserede adgangsstyring på Analyseplatformen her.
+
+
+Bestilling af adgange til data
+Før et projekt kan tilgå data fra data warehouse 
+• Bestillinger af eksisterende tabeller i DW (BI & DW) (med denne MitIT blanket)
+• Procesejers eller KCs ansvar at godkende dataadgange til en medarbejder
+• Under udvikling er det muligt for projekterne at kopiere data i projektfoldere
+• Projekterne er selv ansvarlige for at rydde op for data
+• Under træning og produktion forbliver data i DW – det loades under hvert run
+
+
+
+Andre bestillinger i AP
+• Oprettelse af forskellige pakker baseret på skabeloner: 
+o Modelpakker -> Modeller
+o Taskpakker -> Analytics REST API’er
+o Batchpakker -> Konfigurerebarer Jenkinspipelines
+o Analytics Apps -> Shiny og Streamlit*
+• Alle skabeloner indeholder en metadatafil som indeholder oplysninger om projektet. Dette bruges til at danne AP’s applikationsoverblik
+• Bestilling af support
+Bestillinger deployment samt supporthenvendelser laves igennem MitIT med denne blanket.
+Bestillinger vedrørende projekter, f.eks. oprettelse af nye repositories eller ændringer i roller laves igennem denne blanket.
+
+
+Udvikling
+• Udvikling i R på en serverbaseret IDE - Rstudio
+• Udvikling i python både på en serverbaseret IDE eller via en lokal Vscode med ssh forbindelse til AP
+• AP 3 CI/CD bygge- og deployjobs samt træning som en del af byggejobbene
+• AP 4 CI/CD bygge- og deployjobs – Afkoblet træning i MLFlow
+• CI/CD for at sikre blandt andet kvalitet og reproducerbarhed
+• Continuos delivery sikrer i dag funktionsadskillelse og er processen for change management – på sigt kan vi opnå continuos deployment
+Compliancekrav
+Compliancekrav som ikke er implementeret eller kan implementeres på AP skal afdækkes af projekterne i denne skabelon.
+• Udfyldt compliance blanketter:
+1. Stamoplysninger
+2. Databeskyttelse by design
+3. Forvaltningsret by design
+4. Informationssikkerhed
+5. Øvrige lovkrav
+
+
+
+Produktionslægning
+• Intern MDI 
+o Review intern i MDI-teams
+o Deployments (change requests) bestilles via MitIT (med denne blanket)
+• Self Service 
+o AA reviewer ML-projekter udviklet på analyseplatformen, hvis de indeholder en ML- eller AI-model. OBS, hvis en shiny-model udstiller data fra datawarehouse, men ikke foretager en AI eller ML-behandling af data må vi ikke produktionslægge den. 
+• Compliancekrav skal være på plads inden produktionslægning og verificeres som en del af review 
+
+Drift
+Før produktionslægning af en ny ML-løsning bør et årshjul, som eksemplet i dokumentet Årshjul for ML-løsninger i produktion.pptx, udarbejdes for den løbende kvalitetssikring og vedligehold af løsningen. Udarbejdelsen af årshjulet inkluderer fastlæggelse af de løsningsspecifikke rammer for hver af de listede driftsaktiviteter i tabellen til højre (ikke alle aktiviteter er obligatoriske).
+
+
+
+
+
+Dekommissionering
+• Projekterne bestiller dekommissionering via MitIT
+• De forskellige artefakter som udgør en applikation slettes eller arkiveres
+
+Brugerrejsens processer og involverede applikationer
+
