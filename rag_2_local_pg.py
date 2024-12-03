@@ -110,7 +110,7 @@ class HybridVectorDB:
         
         print(f"Added {len(documents)} documents to both databases")
 
-    def search(self, query: str, k: int = 5, semantic_weight: float = 0.7) -> List[Dict[str, Any]]:
+    def search(self, query: str, k: int = 20, semantic_weight: float = 0.7) -> List[Dict[str, Any]]:
         """Hybrid search combining PostgreSQL vector similarity and Elasticsearch BM25"""
         # Get semantic search results from PostgreSQL
         if query in self.query_cache:
@@ -233,7 +233,7 @@ class HybridRAGSystem:
         self.vector_db.add_documents(chunks)
         print("Document loaded successfully")
 
-    def query(self, question: str, k: int = 5) -> str:
+    def query(self, question: str, k: int = 20) -> str:
         """Query the RAG system"""
         # Retrieve relevant chunks using hybrid search
         relevant_chunks = self.vector_db.search(question, k=k)
