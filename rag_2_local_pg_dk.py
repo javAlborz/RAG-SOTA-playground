@@ -361,7 +361,7 @@ def main():
         if question.lower() == 'exit':
             break
         
-        response = rag.query(question)
+        response = rag.query(question, k=100)
         print("\nSvar:", response)
 
 if __name__ == "__main__":

@@ -159,7 +159,7 @@ class PGVector:
             
             results = []
             for doc, metadata_str, similarity in cursor.fetchall():
-                print(f"Found match with similarity: {similarity}")
+                # print(f"Found match with similarity: {similarity}")
                 try:
                     # Parse the metadata string back into a dict
                     metadata = json.loads(metadata_str) if metadata_str else {}
