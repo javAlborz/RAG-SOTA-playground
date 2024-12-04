@@ -285,7 +285,11 @@ Please provide a clear and concise answer based on the context provided. If the 
         
         return response.choices[0].message.content
 
+<<<<<<<< HEAD:fastapi/rag_1_local.py
 def rag_init():
+========
+def rag_init()
+>>>>>>>> 084e31d97eee8625819335d92e5bfa2cd09affb4:rag_1_local.py
     rag = RAGSystem(
             embeddings_url=os.getenv("LOCAL_EMBEDDINGS_URL", "http://localhost:8000"),
             llm_url=os.getenv("LOCAL_LLM_URL", "http://localhost:8001"),
@@ -319,7 +323,11 @@ def do_embedding(rag):
 
 def make_query(rag, question):
     response = rag.query(question)
+<<<<<<<< HEAD:fastapi/rag_1_local.py
     return response
+========
+    print("\nResponse:", response)
+>>>>>>>> 084e31d97eee8625819335d92e5bfa2cd09affb4:rag_1_local.py
 
 
 
