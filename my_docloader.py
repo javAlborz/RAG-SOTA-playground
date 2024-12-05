@@ -17,7 +17,7 @@ class DocumentLoader:
         
         if file_extension == '.csv':
             return DocumentLoader._load_csv(file_path)
-        elif file_extension == '.txt':
+        elif file_extension in ['.txt', '.md']:  # Handle .md same as .txt
             return DocumentLoader._load_txt(file_path)
         elif file_extension == '.json':
             return DocumentLoader._load_json(file_path)

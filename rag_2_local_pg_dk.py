@@ -316,7 +316,7 @@ class DanishRAGSystem:
 
 Spørgsmål: {question}
 
-Giv venligst et klart og præcist svar baseret på den givne kontekst. Hvis konteksten ikke indeholder nok information til at besvare spørgsmålet fuldt ud, skal du angive dette."""
+Giv venligst et klart og præcist svar baseret på den givne kontekst. Vedhæft linken til den relevant dokumentation fra den givne kontekst. Hvis konteksten ikke indeholder nok information til at besvare spørgsmålet fuldt ud, skal du angive dette."""
 
         response = self.llm.chat.completions.create(
             model="/llama-3.1-70b",  # Use your local model
