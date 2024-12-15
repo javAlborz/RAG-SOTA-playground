@@ -63,9 +63,5 @@ The system supports various document formats:
 
 ## Future Improvements and ToDos
 
-- Implementation of contextual embeddings
 - User interface improvements
-- Using our own endpoints. Requires small llama model for contextual embedding sidequest
-
-- refactor:
-  - common document loader class
+- Multiple file indexing to PGvector
