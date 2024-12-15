@@ -1,4 +1,4 @@
-# RAGATHON
+# RAG-SOTA-plauyground
 This project implements a Retrieval Augmented Generation (RAG) system with multiple retrieval methods, allowing users to experiment with different approaches to document retrieval and question answering.
 
 ## Overview
