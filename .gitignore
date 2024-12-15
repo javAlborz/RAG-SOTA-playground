@@ -6,3 +6,4 @@ venv/
 .env
 DDNEA/
 data_temp/
+local/
